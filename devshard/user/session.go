@@ -241,9 +241,9 @@ type Session struct {
 	participantKeys []string
 	clients         []HostClient
 	nonce           uint64
-	diffs           []types.Diff                 // append-only log
-	hostSyncNonce   map[int]uint64               // hostIdx -> last nonce sent
-	pendingTxs      []*types.DevshardTx          // from host mempools, for next diff
+	diffs           []types.Diff        // append-only log
+	hostSyncNonce   map[int]uint64      // hostIdx -> last nonce sent
+	pendingTxs      []*types.DevshardTx // from host mempools, for next diff
 	// pendingTxKeys dedups the current pendingTxs slice by tx_type:id. It is
 	// rebuilt from what compose retained, so a tx that failed to apply frees
 	// its key again -- otherwise the first host to propose a bogus tx would
@@ -2028,6 +2028,36 @@ func (s *Session) PendingTxs() []*types.DevshardTx {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.pendingTxs
+}
+
+// StateSizes returns the sizes of the gateway-side protocol collections used
+// while composing and applying diffs. It is intentionally a size-only view so
+// diagnostics do not expose transaction or signature contents.
+type StateSizes struct {
+	Diffs           int
+	DiffBytes       int64
+	SignatureNonces int
+	NonceStates     int
+	PendingTxs      int
+	AppliedTxKeys   int
+}
+
+func (s *Session) StateSizes() StateSizes {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var diffBytes int64
+	for _, diff := range s.diffs {
+		content := state.BuildDiffContent(s.escrowID, diff.Nonce, diff.Txs, diff.PostStateRoot)
+		diffBytes += int64(proto.Size(content) + len(diff.UserSig))
+	}
+	return StateSizes{
+		Diffs:           len(s.diffs),
+		DiffBytes:       diffBytes,
+		SignatureNonces: len(s.signatures),
+		NonceStates:     len(s.nonceStates),
+		PendingTxs:      len(s.pendingTxs),
+		AppliedTxKeys:   len(s.appliedTxKeys),
+	}
 }
 
 // FinishTxFor marshals the pending MsgFinishInference for inferenceID under
